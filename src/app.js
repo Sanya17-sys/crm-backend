@@ -7,7 +7,7 @@ const jwt = require("jsonwebtoken")
 const generatetoken = require("./utils/jwt")
 const authenticate = require('./middleware/auth');
 const cors = require('cors');
-const nodemailer = require("nodemailer");
+const { sendEmail } = require("./utils/mailer");
 const upload = require("./middleware/multer")
 const addProduct = require("./controller/add.product")
 const fs = require("fs");
@@ -19,13 +19,6 @@ app.use(cors())
 
 
 const otpStore = {};
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
 
 /**
  * GET used to get the user full profile
@@ -162,13 +155,11 @@ app.post("/inventory/forgot-password", async (req, res) => {
     const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
     const resetLink = `${clientUrl}/reset-password/${resetToken}`;
 
-    try {
-      if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-        await transporter.sendMail({
-          from: `"InventoryPro" <${process.env.EMAIL_USER}>`,
-          to: email,
-          subject: "Reset Your Password — InventoryPro",
-          html: `
+    // Dispatch email in background with keep-alive
+    sendEmail({
+      to: email,
+      subject: "Reset Your Password — InventoryPro",
+      html: `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
@@ -279,19 +270,21 @@ app.post("/inventory/forgot-password", async (req, res) => {
 </body>
 </html>
 `,
-        });
-      } else {
-        console.warn("⚠️ SMTP credentials not configured. Reset link generated:");
+    }).then(res => {
+      if (res && res.notConfigured) {
+        console.warn("⚠️ Brevo credentials not configured. Reset link generated:");
         console.log(`🔑 [DEV RESET LINK] for ${email}: ${resetLink}`);
       }
-    } catch (mailErr) {
-      console.warn("⚠️ Nodemailer Warning:", mailErr.message);
+    }).catch(mailErr => {
+      console.warn("⚠️ Brevo Warning:", mailErr.message);
       console.log(`🔑 [DEV RESET LINK] for ${email}: ${resetLink}`);
-    }
+    });
+
+    console.log(`🔑 [DEV RESET LINK] for ${email}: ${resetLink}`);
 
     res.status(200).json({
       message: "Password reset link processed successfully",
-      resetLink: process.env.NODE_ENV === "development" ? resetLink : undefined,
+      resetLink: process.env.NODE_ENV !== "production" ? resetLink : undefined,
     });
 
   } catch (error) {
@@ -495,13 +488,12 @@ app.post("/inventory/send-otp", async (req, res) => {
       expires: Date.now() + 5 * 60 * 1000
     };
 
-    try {
-      if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-        await transporter.sendMail({
-          from: `"InventoryPro" <${process.env.EMAIL_USER}>`,
-          to: email,
-          subject: "Your Verification Code — InventoryPro",
-          html: `
+    // Dispatch email in background with keep-alive
+    sendEmail({
+      to: email,
+      name: name,
+      subject: "Your Verification Code — InventoryPro",
+      html: `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
@@ -610,19 +602,21 @@ app.post("/inventory/send-otp", async (req, res) => {
 </body>
 </html>
 `
-        });
-      } else {
-        console.warn("⚠️ SMTP credentials not configured. OTP generated for dev mode:");
+    }).then(res => {
+      if (res && res.notConfigured) {
+        console.warn("⚠️ Brevo credentials not configured. OTP generated for dev mode:");
         console.log(`🔑 [DEV OTP] for ${email}: ${otp}`);
       }
-    } catch (mailErr) {
-      console.warn("⚠️ Nodemailer Warning:", mailErr.message);
+    }).catch(mailErr => {
+      console.warn("⚠️ Brevo Warning:", mailErr.message);
       console.log(`🔑 [DEV OTP] for ${email}: ${otp}`);
-    }
+    });
+
+    console.log(`🔑 [DEV OTP] for ${email}: ${otp}`);
 
     res.status(200).json({
       message: "OTP sent successfully",
-      otp: process.env.NODE_ENV === "development" ? otp : undefined
+      otp: process.env.NODE_ENV !== "production" ? otp : undefined
     });
 
   } catch (error) {
@@ -900,12 +894,11 @@ app.post("/inventory/send-low-stock-alert", authenticate, async (req, res) => {
       .join("");
 
     try {
-      if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-        await transporter.sendMail({
-          from: `"Inventory Pro" <${process.env.EMAIL_USER}>`,
-          to: user.email,
-          subject: "⚠️ Low Stock Alert - Inventory Pro",
-          html: `
+      const emailResult = await sendEmail({
+        to: user.email,
+        name: user.name,
+        subject: "⚠️ Low Stock Alert - Inventory Pro",
+        html: `
             <div style="font-family: Arial, sans-serif; background: #f4f7fc; padding: 30px;">
               <div style="max-width: 650px; margin: auto; background: white; border-radius: 16px; overflow: hidden;">
                 <div style="background: #2563eb; padding: 28px; text-align: center; color: white;">
@@ -925,9 +918,10 @@ app.post("/inventory/send-low-stock-alert", authenticate, async (req, res) => {
               </div>
             </div>
           `,
-        });
-      } else {
-        console.log(`⚠️ Low stock alert triggered for ${user.email} (${products.length} products low)`);
+      });
+
+      if (emailResult && emailResult.notConfigured) {
+        console.log(`⚠️ Low stock alert triggered for ${user.email} (${products.length} products low - Brevo API key not set)`);
       }
     } catch (mailErr) {
       console.warn("⚠️ Low stock mail warning:", mailErr.message);
