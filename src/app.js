@@ -14,6 +14,16 @@ const fs = require("fs");
 const path = require("path");
 const logActivity = require("./utils/activityLogger")
 
+const dns = require("dns");
+
+dns.lookup(process.env.DB_HOST, (err, address) => {
+    if (err) {
+        console.log("❌ DNS ERROR:", err);
+    } else {
+        console.log("✅ DNS RESOLVED:", address);
+    }
+});
+
 app.use(express.json())
 app.use(cors())
 
